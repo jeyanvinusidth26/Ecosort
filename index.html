@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>EcoSort Mobile AI</title>
+
+    <!-- TensorFlow.js + MobileNet -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #2e7d32;
+            --primary-light: #e8f5e9;
+            --danger: #c62828;
+            --danger-light: #ffebee;
+            --dark: #212121;
+            --gray: #757575;
+            --light-gray: #f5f5f5;
+            --orange: #e65100;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                         Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #f0f4f1;
+            color: var(--dark);
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 500px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            text-align: center;
+            padding: 15px;
+            background: #ffffff;
+            border-bottom: 1px solid var(--light-gray);
+        }
+
+        header h1 {
+            color: var(--primary);
+            font-size: 1.6rem;
+            font-weight: 700;
+        }
+
+        .badge-offline {
+            display: inline-block;
+            background: #e0f2f1;
+            color: #004d40;
+            padding: 3px 9px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+
+        .status-loading {
+            background: #fff3e0;
+            color: var(--orange);
+            padding: 12px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .camera-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            aspect-ratio: 4 / 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .mirror-view {
+            transform: scaleX(-1);
+        }
+
+        .overlay-placeholder {
+            color: #ffffff;
+            text-align: center;
+            padding: 20px;
+            font-size: 1rem;
+        }
+
+        .action-bar {
+            display: flex;
+            padding: 12px;
+            gap: 10px;
+            background: #fafafa;
+            border-bottom: 1px solid var(--light-gray);
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.btn-secondary {
+            background-color: #455a64;
+        }
+
+        .result-panel {
+            padding: 16px;
+            background: var(--light-gray);
+            flex-grow: 1;
+            min-height: 160px;
+            transition: all 0.3s ease;
+        }
+
+        .biodegradable-res {
+            background-color: var(--primary-light);
+            border-left: 6px solid var(--primary);
+        }
+
+        .non-biodegradable-res {
+            background-color: var(--danger-light);
+            border-left: 6px solid var(--danger);
+        }
+
+        .unknown-res {
+            background-color: var(--light-gray);
+            border-left: 6px solid var(--gray);
+        }
+
+        .result-panel h2 {
+            font-size: 1.3rem;
+            margin-bottom: 6px;
+        }
+
+        .result-panel p {
+            font-size: 0.95rem;
+            line-height: 1.4;
+        }
+
+        .ai-meta {
+            font-size: 0.8rem;
+            color: var(--gray);
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        .confidence-bar {
+            width: 100%;
+            height: 8px;
+            background: #ddd;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            transition: width 0.3s ease;
+        }
+
+        .tips {
+            padding: 12px 16px;
+            font-size: 0.8rem;
+            color: var(--gray);
+            background: #fff;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="app-container">
+
+    <header>
+        <h1>EcoSort Mobile AI</h1>
+        <span class="badge-offline">
+            ⚡ Local Phone AI
+        </span>
+    </header>
+
+    <div id="loadingStatus" class="status-loading">
+        📱 Initializing Phone Vision Core Engine...
+    </div>
+
+    <div class="camera-container">
+
+        <video id="phoneCam"
+               autoplay
+               playsinline
+               muted
+               style="display:none;">
+        </video>
+
+        <div id="placeholder" class="overlay-placeholder">
+            <p>Tap "Start Scanner" to turn on your phone camera.</p>
+        </div>
+
+    </div>
+
+    <div class="action-bar">
+
+        <button id="toggleCamBtn"
+                onclick="togglePhoneCamera()"
+                disabled>
+            📸 Start Scanner
+        </button>
+
+        <button id="switchCamBtn"
+                class="btn-secondary"
+                onclick="switchCameraMode()"
+                style="display:none;">
+            🔄 Flip Cam
+        </button>
+
+    </div>
+
+    <div id="resultCard" class="result-panel">
+
+        <h2 id="resultTitle">
+            System Offline Ready
+        </h2>
+
+        <p id="resultDesc">
+            Point your phone's camera lens directly at an item
+            to run an instant bio-decay status scan.
+        </p>
+
+        <div id="aiConfidence" class="ai-meta"></div>
+
+        <div class="confidence-bar">
+            <div id="confidenceFill" class="confidence-fill"></div>
+        </div>
+
+    </div>
+
+    <div class="tips">
+        💡 For better results, place one waste item in the center
+        of the camera and use good lighting.
+    </div>
+
+</div>
+
+<script>
+
+    // ------------------------------------------------------------
+    // ECO ITEMS
+    // ------------------------------------------------------------
+
+    const bioItems = [
+        "apple",
+        "banana",
+        "orange",
+        "fruit",
+        "vegetable",
+        "scraps",
+        "paper",
+        "cardboard",
+        "leaf",
+        "leaves",
+        "grass",
+        "wood",
+        "bread",
+        "food",
+        "egg",
+        "tea",
+        "coffee",
+        "plant",
+        "flower",
+        "mushroom",
+        "corn",
+        "potato",
+        "carrot",
+        "broccoli",
+        "cabbage"
+    ];
+
+    const nonBioItems = [
+        "bottle",
+        "plastic",
+        "polythene",
+        "glass",
+        "can",
+        "aluminum",
+        "metal",
+        "styrofoam",
+        "nylon",
+        "rubber",
+        "battery",
+        "wire",
+        "electronic",
+        "cup",
+        "wrapper",
+        "pen",
+        "phone",
+        "computer",
+        "keyboard",
+        "mouse",
+        "remote",
+        "tv",
+        "monitor",
+        "laptop",
+        "shoe",
+        "sandal",
+        "tin",
+        "packet",
+        "container",
+        "carton"
+    ];
+
+
+    // ------------------------------------------------------------
+    // VARIABLES
+    // ------------------------------------------------------------
+
+    let aiModel = undefined;
+
+    const videoStream = document.getElementById("phoneCam");
+
+    let isActive = false;
+
+    let frameLoopId = null;
+
+    let currentFacingMode = "environment";
+
+    let lastPrediction = "";
+
+    let processing = false;
+
+
+    // ------------------------------------------------------------
+    // LOAD AI MODEL
+    // ------------------------------------------------------------
+
+    async function loadMobileEngine() {
+
+        try {
+
+            document.getElementById("loadingStatus").textContent =
+                "🧠 Loading Mobile AI model...";
+
+            aiModel = await mobilenet.load({
+                version: 2,
+                alpha: 1.0
+            });
+
+            document.getElementById("loadingStatus").style.display =
+                "none";
+
+            document.getElementById("toggleCamBtn").disabled = false;
+
+            console.log("MobileNet loaded successfully.");
+
+        } catch (error) {
+
+            console.error("AI loading error:", error);
+
+            document.getElementById("loadingStatus").textContent =
+                "⚠️ AI model could not load. Check your internet connection and refresh.";
+
+        }
+    }
+
+
+    // ------------------------------------------------------------
+    // START / STOP CAMERA
+    // ------------------------------------------------------------
+
+    async function togglePhoneCamera() {
+
+        if (isActive) {
+
+            stopPhoneCamera();
+
+            return;
+        }
+
+        try {
+
+            if (!navigator.mediaDevices ||
+                !navigator.mediaDevices.getUserMedia) {
+
+                alert(
+                    "Camera access is not supported by this browser."
+                );
+
+                return;
+            }
+
+            const constraints = {
+
+                video: {
+                    facingMode: currentFacingMode,
+                    width: {
+                        ideal: 640
+                    },
+                    height: {
+                        ideal: 480
+                    }
+                },
+
+                audio: false
+            };
+
+            const stream =
+                await navigator.mediaDevices.getUserMedia(
+                    constraints
+                );
+
+            videoStream.srcObject = stream;
+
+            videoStream.style.display = "block";
+
+            document.getElementById("placeholder").style.display =
+                "none";
+
+            document.getElementById("toggleCamBtn").textContent =
+                "🛑 Stop Scanner";
+
+            document.getElementById("switchCamBtn").style.display =
+                "flex";
+
+            if (currentFacingMode === "user") {
+
+                videoStream.classList.add("mirror-view");
+
+            } else {
+
+                videoStream.classList.remove("mirror-view");
+            }
+
+            isActive = true;
+
+            resetDisplayUI();
+
+            runLiveClassificationLoop();
+
+        } catch (err) {
+
+            console.error(err);
+
+            alert(
+                "Camera access denied. Please allow camera permission in your browser."
+            );
+        }
+    }
+
+
+    // ------------------------------------------------------------
+    // STOP CAMERA
+    // ------------------------------------------------------------
+
+    function stopPhoneCamera() {
+
+        isActive = false;
+
+        if (frameLoopId) {
+
+            cancelAnimationFrame(frameLoopId);
+
+            frameLoopId = null;
+        }
+
+        const tracks =
+            videoStream.srcObject?.getTracks();
+
+        if (tracks) {
+
+            tracks.forEach(track => track.stop());
+        }
+
+        videoStream.srcObject = null;
+
+        videoStream.style.display = "none";
+
+        document.getElementById("placeholder").style.display =
+            "block";
+
+        document.getElementById("toggleCamBtn").textContent =
+            "📸 Start Scanner";
+
+        document.getElementById("switchCamBtn").style.display =
+            "none";
+
+        resetDisplayUI();
+    }
+
+
+    // ------------------------------------------------------------
+    // CAMERA SWITCH
+    // ------------------------------------------------------------
+
+    async function switchCameraMode() {
+
+        currentFacingMode =
+            currentFacingMode === "environment"
+                ? "user"
+                : "environment";
+
+        if (isActive) {
+
+            stopPhoneCamera();
+
+            await togglePhoneCamera();
+        }
+    }
+
+
+    // ------------------------------------------------------------
+    // AI CLASSIFICATION LOOP
+    // ------------------------------------------------------------
+
+    async function runLiveClassificationLoop() {
+
+        if (!isActive || !aiModel) {
+            return;
+        }
+
+        if (processing) {
+
+            frameLoopId =
+                requestAnimationFrame(
+                    runLiveClassificationLoop
+                );
+
+            return;
+        }
+
+        if (videoStream.readyState < 2) {
+
+            frameLoopId =
+                requestAnimationFrame(
+                    runLiveClassificationLoop
+                );
+
+            return;
+        }
+
+        processing = true;
+
+        try {
+
+            const predictions =
+                await aiModel.classify(
+                    videoStream,
+                    5
+                );
+
+            if (predictions &&
+                predictions.length > 0) {
+
+                analyzePredictions(predictions);
+            }
+
+        } catch (error) {
+
+            console.error(
+                "Classification error:",
+                error
+            );
+        }
+
+        processing = false;
+
+        if (isActive) {
+
+            // Slight delay keeps phone CPU usage reasonable.
+            setTimeout(() => {
+
+                frameLoopId =
+                    requestAnimationFrame(
+                        runLiveClassificationLoop
+                    );
+
+            }, 150);
+        }
+    }
+
+
+    // ------------------------------------------------------------
+    // ANALYZE MOBILE NET RESULTS
+    // ------------------------------------------------------------
+
+    function analyzePredictions(predictions) {
+
+        let bestBio = null;
+
+        let bestNonBio = null;
+
+        let bestUnknown = null;
+
+
+        predictions.forEach(prediction => {
+
+            const name =
+                prediction.className.toLowerCase();
+
+            const probability =
+                prediction.probability;
+
+            const cleanName =
+                name.replace(/[^a-z0-9 ]/g, " ");
+
+            // Check biodegradable keywords.
+            const isBio =
+                bioItems.some(item =>
+                    cleanName.includes(item)
+                );
+
+            // Check non-biodegradable keywords.
+            const isNonBio =
+                nonBioItems.some(item =>
+                    cleanName.includes(item)
+                );
+
+
+            if (isBio) {
+
+                if (!bestBio ||
+                    probability > bestBio.probability) {
+
+                    bestBio = prediction;
+                }
+
+            } else if (isNonBio) {
+
+                if (!bestNonBio ||
+                    probability > bestNonBio.probability) {
+
+                    bestNonBio = prediction;
+                }
+
+            } else {
+
+                if (!bestUnknown ||
+                    probability > bestUnknown.probability) {
+
+                    bestUnknown = prediction;
+                }
+            }
+
+        });
+
+
+        // Give matching waste categories priority.
+        if (bestBio &&
+            (!bestNonBio ||
+             bestBio.probability >= bestNonBio.probability)) {
+
+            showBiodegradable(
+                bestBio.className,
+                bestBio.probability
+            );
+
+            return;
+        }
+
+
+        if (bestNonBio) {
+
+            showNonBiodegradable(
+                bestNonBio.className,
+                bestNonBio.probability
+            );
+
+            return;
+        }
+
+
+        if (bestUnknown) {
+
+            showUnknown(
+                bestUnknown.className,
+                bestUnknown.probability
+            );
+
+            return;
+        }
+
+
+        resetDisplayUI();
+    }
+
+
+    // ------------------------------------------------------------
+    // BIODEGRADABLE RESULT
+    // ------------------------------------------------------------
+
+    function showBiodegradable(name, probability) {
+
+        const card =
+            document.getElementById("resultCard");
+
+        card.className =
+            "result-panel biodegradable-res";
+
+        document.getElementById("resultTitle").textContent =
+            "🌱 Biodegradable";
+
+        document.getElementById("resultDesc").textContent =
+            `"${formatPrediction(name)}" appears to be biodegradable. ` +
+            "Place it in the organic/compost waste bin.";
+
+        updateConfidence(probability);
+
+        lastPrediction = name;
+    }
+
+
+    // ------------------------------------------------------------
+    // NON-BIODEGRADABLE RESULT
+    // ------------------------------------------------------------
+
+    function showNonBiodegradable(name, probability) {
+
+        const card =
+            document.getElementById("resultCard");
+
+        card.className =
+            "result-panel non-biodegradable-res";
+
+        document.getElementById("resultTitle").textContent =
+            "🚫 Non-Biodegradable";
+
+        document.getElementById("resultDesc").textContent =
+            `"${formatPrediction(name)}" appears to be non-biodegradable. ` +
+            "Place it in the appropriate recyclable/general waste bin.";
+
+        updateConfidence(probability);
+
+        lastPrediction = name;
+    }
+
+
+    // ------------------------------------------------------------
+    // UNKNOWN RESULT
+    // ------------------------------------------------------------
+
+    function showUnknown(name, probability) {
+
+        const card =
+            document.getElementById("resultCard");
+
+        card.className =
+            "result-panel unknown-res";
+
+        document.getElementById("resultTitle").textContent =
+            "❓ Item Not Certain";
+
+        document.getElementById("resultDesc").textContent =
+            `AI sees "${formatPrediction(name)}", but it cannot confidently determine its waste category.`;
+
+        updateConfidence(probability);
+
+        lastPrediction = name;
+    }
+
+
+    // ------------------------------------------------------------
+    // CONFIDENCE
+    // ------------------------------------------------------------
+
+    function updateConfidence(probability) {
+
+        const percentage =
+            Math.round(probability * 100);
+
+        document.getElementById("aiConfidence").textContent =
+            `AI confidence: ${percentage}%`;
+
+        const fill =
+            document.getElementById("confidenceFill");
+
+        fill.style.width =
+            percentage + "%";
+
+
+        if (percentage >= 70) {
+
+            fill.style.background =
+                "var(--primary)";
+
+        } else if (percentage >= 40) {
+
+            fill.style.background =
+                "#f9a825";
+
+        } else {
+
+            fill.style.background =
+                "var(--danger)";
+        }
+    }
+
+
+    // ------------------------------------------------------------
+    // FORMAT PREDICTION NAME
+    // ------------------------------------------------------------
+
+    function formatPrediction(name) {
+
+        return name
+            .split(",")[0]
+            .trim()
+            .replace(/\b\w/g, letter =>
+                letter.toUpperCase()
+            );
+    }
+
+
+    // ------------------------------------------------------------
+    // RESET DISPLAY
+    // ------------------------------------------------------------
+
+    function resetDisplayUI() {
+
+        const card =
+            document.getElementById("resultCard");
+
+        card.className =
+            "result-panel unknown-res";
+
+        document.getElementById("resultTitle").textContent =
+            "System Offline Ready";
+
+        document.getElementById("resultDesc").textContent =
+            "Point your phone's camera lens directly at an item to run an instant bio-decay status scan.";
+
+        document.getElementById("aiConfidence").textContent =
+            "";
+
+        document.getElementById("confidenceFill").style.width =
+            "0%";
+
+        lastPrediction = "";
+    }
+
+
+    // ------------------------------------------------------------
+    // PAGE CLEANUP
+    // ------------------------------------------------------------
+
+    window.addEventListener("beforeunload", () => {
+
+        const tracks =
+            videoStream.srcObject?.getTracks();
+
+        if (tracks) {
+
+            tracks.forEach(track =>
+                track.stop()
+            );
+        }
+    });
+
+
+    // ------------------------------------------------------------
+    // START AI
+    // ------------------------------------------------------------
+
+    window.addEventListener("load", () => {
+
+        loadMobileEngine();
+
+    });
+
+</script>
+
+</body>
+</html>
